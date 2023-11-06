@@ -1,0 +1,120 @@
+---
+- name: Create One Time VPN server
+  hosts: localhost
+  vars_files:
+  - ./vars/VPSproviderKey.yml
+  tasks:
+# Generate Token (ALWAYS)
+    - name: generate token
+      uri:
+        url: 'https://api.neoserver.ru/auth'
+        method: POST
+        body_format: json
+        body:
+          key: '{{ vpsHostingProviderKey }}'
+      register: token
+      tags: always
+    - name: Set token into tokendata variable 
+      set_fact:
+        tokendata: "{{ token | json_query('json.token') }}"
+      tags: always
+# CREATE Remote Server
+    - name: Create server
+      uri: 
+        url: 'https://api.neoserver.ru/server'
+        method: POST
+        headers:
+          Authorization: "Bearer {{ tokendata }}"
+        body_format: json
+        body: "{{ lookup('file','./vars/body_serverCreateRequest.json') }}"
+      register: serverCreateResponce
+      tags: create
+    - name: Put server creation response into a file
+      copy:
+        content: '{{ serverCreateResponce.json | to_nice_json }}'
+        dest: './vars/generated_ServerInfo.json'
+      tags: create
+# Read IP from Server Data and put it in in-memory inventory
+    - name: Read json and register result
+      slurp:
+        src: ./vars/generated_ServerInfo.json
+      register: ServerInfo
+      tags: [ create, delete ]
+    - name: Set fact server dictionary
+      set_fact:
+        server: "{{ ServerInfo.content | b64decode | from_json }}"
+      tags: [ create, delete ]
+    - name: Add host to inventory
+      add_host:
+          name: vpn-server
+          ansible_host: "{{ server.ip }}"
+      tags: create
+    - name: Waiting for establishing connection
+      wait_for_connection:
+        delay: 420
+        timeout: 450
+      tags: create
+# DELETE Remote Server
+    - name: DELETE server
+      uri: 
+        url: 'https://api.neoserver.ru/server/{{ server.id }}'
+        method: DELETE
+        headers:
+          Authorization: "Bearer {{ tokendata }}"
+      tags: delete
+# Configuring newly created remote host
+- hosts: vpn-server
+  vars_files:
+    - ./vars/telegramBot.yml
+    - ./vars/defaultVpnUser.yml
+  tasks:
+    - name: Installation of packages
+      apt: 
+        pkg:
+        - wireguard
+        - qrencode
+        update_cache: yes
+      tags: configure
+    - name: KeyPairGen and PortForward
+      shell: |
+        wg genkey | tee /etc/wireguard/privatekey | wg pubkey > /etc/wireguard/publickey
+        chmod 600 /etc/wireguard/privatekey
+      tags: configure
+    - name: Get Private Key
+      slurp:
+        src: /etc/wireguard/privatekey
+      register: privatekey
+      tags: configure
+    - set_fact:
+        privatekey: "{{ privatekey['content'] | b64decode }}"
+      tags: configure
+
+    - name: Push wg0.conf
+      template:
+        src: ./templates/wg0.conf.j2
+        dest: /etc/wireguard/wg0.conf
+      tags: configure
+    - name: Run wirequard server
+      shell: |
+        echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+        sysctl -p
+        systemctl enable wg-quick@wg0.service
+        systemctl start wg-quick@wg0.service
+        systemctl status wg-quick@wg0.service
+      tags: configure
+
+# Create user
+    - name: Push AddUser bash script
+      template:
+        src: ./templates/botHandler.sh.j2
+        dest: /etc/wireguard/botHandler.sh
+      tags: [ adduser, useradd ]
+    - name: Make script executable
+      file:
+        path: /etc/wireguard/botHandler.sh
+        mode: '700'
+      tags: [ adduser, useradd ]
+    - name: Run AddUser script
+      shell: |
+        bash /etc/wireguard/botHandler.sh '{{ user }}' '{{ number }}'
+      tags: [ adduser, useradd ]

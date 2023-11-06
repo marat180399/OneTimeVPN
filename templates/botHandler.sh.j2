@@ -1,0 +1,33 @@
+#!/bin/bash
+VpnUsername=$(echo $1)
+VpnIpAddress="10.0.0.$(echo $2)"
+
+ServerPort="$(ip a | grep "inet " | head -n 2 | tail -n 1 | awk '{print $2}' | cut -d "/" -f1):51820"
+PublicKey=$(cat /etc/wireguard/publickey)
+
+mkdir /etc/wireguard/$VpnUsername
+wg genkey | tee /etc/wireguard/$VpnUsername/$VpnUsername-privatekey | wg pubkey > /etc/wireguard/$VpnUsername/$VpnUsername-publickey
+echo "[Interface]
+PrivateKey = $(cat /etc/wireguard/$VpnUsername/$VpnUsername-privatekey)
+Address = $VpnIpAddress/24
+DNS = 8.8.8.8
+
+[Peer]
+PublicKey = $PublicKey
+Endpoint = $ServerPort
+AllowedIPs = 0.0.0.0/0
+PersistentKeepalive = 20" > /etc/wireguard/$VpnUsername/$VpnUsername.conf
+
+echo "
+[Peer]
+PublicKey = $(cat /etc/wireguard/$VpnUsername/$VpnUsername-publickey)
+AllowedIPs = $VpnIpAddress" >> /etc/wireguard/wg0.conf
+
+systemctl restart wg-quick@wg0.service
+
+qrencode -o /etc/wireguard/$VpnUsername/$VpnUsername-QR.png < /etc/wireguard/$VpnUsername/$VpnUsername.conf
+
+curl -s -X POST -H 'Content-Type: application/json' -d '{"chat_id": "{{ chatID }}", "text": "Отсканируй QR или импортируй туннель из файла" "disable_notification": false}' https://api.telegram.org/bot{{ botToken }}/sendMessage > /dev/null
+curl -s -F chat_id={{ chatID }} -F photo=@/etc/wireguard/$VpnUsername/$VpnUsername-QR.png https://api.telegram.org/bot{{ botToken }}/sendphoto > /dev/null
+curl -s -F chat_id={{ chatID }} -F document=@/etc/wireguard/$VpnUsername/$VpnUsername.conf https://api.telegram.org/bot{{ botToken }}/sendDocument > /dev/null
+

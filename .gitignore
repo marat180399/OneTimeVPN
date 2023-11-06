@@ -1,0 +1,6 @@
+# Credentials and keys #
+###################
+vars/generated_ServerInfo.json
+vars/telegramBot(MY).yml
+vars/VPSproviderKey(MY).yml
+private(MY).key

@@ -1,0 +1,20 @@
+{
+  "template": {
+    "id": 43,
+    "name": "ubuntu_22",
+    "type": "linux"
+  },
+  "location": "usa",
+  "cpu": 1,
+  "ram": 1024,
+  "disks": [
+    {
+      "size": 10,
+      "type": "sas",
+      "status": "active"
+    }
+  ],
+  "ssh_key": 454,
+  "equipment": "standard",
+  "cost": 0
+}
